@@ -1,0 +1,69 @@
+ #include<SPI.h>
+#include<Pixy.h>
+#include<Servo.h>
+#define SP 160
+#define Kp (-1/4)
+#define servo_offset 90
+#define TILT_LIMIT 90
+
+
+Pixy pixy;
+Servo myservo;
+uint8_t pos, prev_pos;
+/* if program becomes complicated, consider changing datatype */
+
+
+void set_servo_position(uint8_t pos)
+{
+    uint8_t i; 
+    if(prev_pos<pos)
+    {
+        for(i=prev_pos; i<=pos; i++)
+        {
+            myservo.write(i);
+            delay(5);
+        }
+    }
+    if(pos<prev_pos)
+    {
+        for(i=prev_pos; i>=pos; i--)
+        {
+           myservo.write(i);
+            delay(5);
+        }  
+    }
+
+}
+
+
+
+void setup()
+{
+      Serial.begin(9600);
+      pixy.init();
+      myservo.attach(9); 
+      prev_pos = servo_offset;
+}
+
+void loop()
+{
+    int16_t i, step_num=4, blocks, a, err, output, step_size, temp;
+    blocks=pixy.getBlocks();
+    if(blocks)
+    {
+            a = pixy.blocks[0].x;
+            err = a-SP;
+            output = -(err )/4;
+
+           if(output > TILT_LIMIT)
+                output = TILT_LIMIT;
+            if(output < -TILT_LIMIT)
+                output = -TILT_LIMIT;
+            pos = output +servo_offset;
+            set_servo_position(pos); 
+            prev_pos = pos;
+            delay(5);
+  }
+}
+
+
