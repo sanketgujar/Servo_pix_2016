@@ -1,0 +1,294 @@
+#include<SPI.h>
+#include<Pixy.h>
+#include<Servo.h>
+#define SP 160
+#define kp2 1
+#define Kp (-1/2)
+#define servo_offset 90
+#define TILT_LIMIT 90
+#include <Wire.h>
+#include <math.h>
+#define Addr 0x1E               // 7-bit address of HMC5883 compass
+#define COMPASS_THRESH_T 135
+#define COMPASS_THRESH_I 196
+#define output1 A0  //output pin of left sharp sensor
+#define output2 A1  //output pin of  right sharp sensor
+#define kp_compass_02 0.35
+#define kp_compass_01 1.25
+#define kp_compass_03 0.90
+
+
+//unsigned int COMPASS_THRESH_T;
+//unsigned int COMPASS_THRESH_I;
+
+int count =0;             //count of islands
+int flag2 = 0;
+int flag = 0 ;            //flag for river detection
+Pixy pixy;
+Servo myservo;
+uint8_t pos, prev_pos;
+float dist_cm;
+int right_count = 0,kp_op;
+
+
+
+void set_servo_position(uint8_t pos)
+{
+   int i; 
+    if(prev_pos<pos)
+    {
+        for(i=prev_pos; i<=pos; i++)
+        {
+        myservo.write(i);
+        delay(5);
+        }
+  }
+  if(pos<prev_pos)
+  {
+    for(i=prev_pos; i>=pos; i--)
+    {
+          myservo.write(i);
+          delay(5);
+         }
+  }
+}
+
+void setup()
+{
+  Serial.begin(9600);
+  pixy.init();
+ // pinMode (ir, INPUT);
+  myservo.attach(9); 
+  prev_pos = servo_offset;
+  pinMode(3,OUTPUT);
+  digitalWrite(3,LOW);
+  delay(100);                   
+  Wire.begin();
+  Wire.beginTransmission(Addr); 
+  Wire.write(byte(0x02));       //Mode register address
+  Wire.write(byte(0x00));       // Set operating mode to continuous
+  Wire.endTransmission();  
+}
+ 
+int get_angle()
+{
+  int x, y, z;
+  double heading;
+   int curr_angle;
+  // Initiate communications with hmc583l
+  Wire.beginTransmission(Addr);
+  Wire.write(byte(0x03));       // Send request to X MSB register
+  Wire.endTransmission();
+
+  Wire.requestFrom(Addr, 6);    // Request 6 bytes; 2 bytes per axis
+  if(Wire.available() <=6)      // If 6 bytes available
+  {    
+    x = Wire.read() << 8 | Wire.read();
+    z = Wire.read() << 8 | Wire.read();
+    y = Wire.read() << 8 | Wire.read();
+  }
+  
+  heading = atan2(y,x);
+  if(heading<0)
+  {
+    heading += 2*M_PI;
+  }
+  heading =heading*180/M_PI;
+ curr_angle = (int)(heading);
+ 
+  return curr_angle;
+ 
+}
+
+void loop()
+{
+  int  angle_i,angle;
+  int threshold_value;
+  int peak = 0;  
+  int flag1 = 0;
+  int dist;
+  int heading;
+  int16_t i, blocks, a, err, output, step_size, temp, w, h, area, compass_error, output_compass;
+  blocks=pixy.getBlocks();
+  if(blocks)
+  {
+    a = pixy.blocks[0].x;
+    w = pixy.blocks[0].width;
+      
+    err = a-SP;
+    output = -err/4;
+
+    if(output > TILT_LIMIT)
+      output = TILT_LIMIT;
+    if(output < -TILT_LIMIT)
+      output = -TILT_LIMIT;
+    pos = output +servo_offset;
+    
+       
+    if(w > 270)                                                        //T detected
+    {
+          prev_pos = pos;                                          
+          //set_servo_position(135);                                    //Turn
+          //compass_error = (uint16_t)heading-COMPASS_THRESH_T;
+          heading = get_angle();
+                       //  COMPASS_THRESH_T = heading - 60 ;
+                         compass_error = (uint16_t)heading-COMPASS_THRESH_T;
+                         kp_op = kp_compass_03*compass_error ;
+                         pos = 90  +  kp_op;
+                         set_servo_position(pos);
+                         //prev_pos = Servo_angle;
+
+                          while(  pos > 90  )                       //FIRST TURN 
+                          {
+                               prev_pos = pos;
+                              heading = get_angle();
+                              
+                             //Serial.print("HEADING  :");
+                             //Serial.println(heading);
+                             compass_error = (uint16_t)heading-COMPASS_THRESH_T;
+                             kp_op = kp_compass_03*compass_error ;
+                             pos = 90  +  kp_op;
+                             set_servo_position(pos);
+                             delay(50);
+                          }
+                        
+          
+          /*
+          while(compass_error > 5)                                      //Until turned
+          {
+            heading = get_angle();
+            compass_error = (uint16_t)heading-COMPASS_THRESH_T;
+          }
+           */         
+          prev_pos = pos;
+          set_servo_position(90);          //Turn left
+          flag2 = 1;
+    }
+    else if(w>150)
+    {
+          flag=1;  
+    }
+     
+    
+    else
+    {  
+       // PIXY NORMAL DETECTION   
+        set_servo_position(pos);
+        prev_pos = pos;
+        delay(5);   
+    }
+    
+    
+    if(flag == 1 && flag2  == 1)
+    {
+        dist  = analogRead(output1);
+        dist_cm = 4800 / (dist - 20 ) ;
+            //Serial.println( " Flag is Set ");
+            //if(count == 0)    
+            //else
+                //dist  = analogRead(output2);   
+          //  Serial.println(dist_cm);
+            
+            
+            
+            if ((dist_cm > 0) &&( dist_cm < 20 ))
+            {
+                  while(dist_cm >0 && dist_cm < 50 )
+                  {
+                          dist  = analogRead(output1);
+                          dist_cm = 4800 / (dist - 20 ) ;          
+                          Serial.println(dist_cm);
+                  }        
+                  if(count == 0)
+                  {
+                         prev_pos = pos;
+                        // set_servo_position(125);
+                         heading = get_angle();
+                       //  COMPASS_THRESH_T = heading - 60 ;
+                         compass_error = (uint16_t)heading-COMPASS_THRESH_T;
+                         kp_op = kp_compass_01*compass_error ;
+                         pos = 90  +  kp_op;
+                         set_servo_position(pos);
+                         //prev_pos = Servo_angle;
+
+                          while(  pos > 90  )                       //FIRST TURN 
+                          {
+                             prev_pos = pos;
+                              heading = get_angle();
+                              
+                             //Serial.print("HEADING  :");
+                             //Serial.println(heading);
+                             compass_error = (uint16_t)heading-COMPASS_THRESH_T;
+                             kp_op = kp_compass_01*compass_error ;
+                             pos = 90  +  kp_op;
+                             set_servo_position(pos);
+                             delay(100);
+                          }
+                                       
+                          prev_pos = pos;
+                          set_servo_position(90);
+                          
+                          while(right_count < 2)
+                          {
+                              dist  = analogRead(output2);                
+                              dist_cm = 4800 / (dist - 20 ) ;
+                              Serial.println(dist_cm);
+                              if((dist_cm > 0) &&( dist_cm < 25))
+                              {
+                                  while((dist_cm > 0) &&( dist_cm < 25))
+                                  {
+                                        dist  = analogRead(output2);                
+                                        dist_cm = 4800 / (dist - 20 ) ;
+                                       // Serial.print(dist_cm);
+                                       delay(5);
+                                  }
+                                        
+                              
+                                  right_count++;
+                                  Serial.println("---------------------------------------RIGHT COUNT  :  ");
+                                  Serial.print(right_count);
+                                 
+                              
+                              }
+                              
+                          }
+                          prev_pos=pos;
+                          //set_servo_position(75);
+                            
+                          heading = get_angle();
+                          compass_error = COMPASS_THRESH_I - (uint16_t)heading;
+                          kp_op = kp_compass_02*compass_error ;
+                          pos = 90  -  kp_op;
+                          set_servo_position(pos);
+                          while(pos < 90 )                                      //SECOND TURN
+                           {
+                                  prev_pos = pos; 
+                                   heading = get_angle();
+                                  Serial.print("Heading : ");
+                                   Serial.println(heading);
+                               
+                                  compass_error = COMPASS_THRESH_I - (uint16_t)heading;
+                                  kp_op = kp_compass_02*compass_error ;
+                                  pos = 90  -  kp_op;
+                                  set_servo_position(pos);
+                              
+                                 // Serial.println("Compass Error   : ");
+                                  // Serial.print(compass_error);
+                               
+                             }                          
+                          prev_pos=pos;
+                          set_servo_position(90);
+                         
+                          flag=0;
+                        }
+                      
+                  }
+  
+               
+            }
+
+    }  
+    
+ 
+}  
+
